@@ -17,11 +17,12 @@ import java.util.Objects;
 public class AuthorizationHeaderFilter extends AbstractGatewayFilterFactory<AuthorizationHeaderFilter.Config> {
 
     private final JwtUtil jwtUtil;
+    private final WebClient.Builder webClientBuilder;
 
-
-    public AuthorizationHeaderFilter(JwtUtil jwtUtil) {
+    public AuthorizationHeaderFilter(JwtUtil jwtUtil, WebClient.Builder webClientBuilder) {
         super(Config.class);
         this.jwtUtil = jwtUtil;
+        this.webClientBuilder = webClientBuilder;
     }
 
     // GatewayFilter 설정을 위한 Config 클래스
@@ -46,21 +47,20 @@ public class AuthorizationHeaderFilter extends AbstractGatewayFilterFactory<Auth
             String accessToken = authorizationHeader.replace("Bearer ", "");
 
             // JWT 토큰 유효성 검사
-            if(!jwtUtil.validateTokenBoolean(accessToken)){
-                //TODO 에러
+            if (!jwtUtil.validateTokenBoolean(accessToken)) {
+                return onError(exchange, "JWT 토큰이 유효하지 않습니다.", HttpStatus.UNAUTHORIZED);
             }
 
             // JWT 토큰에서 사용자 email 추출
             Long studentId = jwtUtil.getMemberIdFromJwtToken(accessToken);
 
-
             // user-service에서 학생 정보를 가져옴
-            String userServiceUri = "http://localhost:8082/api/users/student-info?studentId=" + studentId;
-            return WebClient.create()
+            String userServiceUri = "lb://USER/api/users/student-info?studentId=" + studentId;
+            return webClientBuilder.build()
                     .get()
                     .uri(userServiceUri)
                     .retrieve()
-                    .bodyToMono(StudentResponseDTO.GetStudentDTO.class) // StudentDTO 클래스를 생성해줘야 함
+                    .bodyToMono(StudentResponseDTO.GetStudentDTO.class)
                     .flatMap(studentDTO -> {
                         // 사용자 정보를 HTTP 요청 헤더에 추가하여 전달
                         ServerHttpRequest newRequest = request.mutate()
@@ -77,12 +77,8 @@ public class AuthorizationHeaderFilter extends AbstractGatewayFilterFactory<Auth
 
     // Mono(단일 값), Flux(다중 값) -> Spring WebFlux
     private Mono<Void> onError(ServerWebExchange exchange, String errorMsg, HttpStatus httpStatus) {
-
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(httpStatus);
-
         return response.setComplete();
     }
-
-
 }
